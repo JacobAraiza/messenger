@@ -2,7 +2,7 @@ use rand::Rng;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig, instruction::Instruction, pubkey::Pubkey,
-    signature::Keypair, signer::Signer, transaction::Transaction,
+    signature::read_keypair_file, signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use structopt::StructOpt;
 
@@ -19,14 +19,10 @@ fn main() {
 struct Arguments {
     #[structopt(default_value = "http://localhost:8899")]
     url: String,
-    #[structopt(parse(try_from_str=load_keypair), default_value = "~/.chat.keypair")]
+    #[structopt(parse(try_from_str=read_keypair_file), default_value = "~/.chat.keypair")]
     keypair: Keypair,
     to_address: Pubkey,
     message: String,
-}
-
-fn load_keypair(path: &str) -> Result<Keypair, std::io::Error> {
-    std::fs::read_to_string(path).map(|string| Keypair::from_base58_string(&string))
 }
 
 fn initialize_direct_chat(

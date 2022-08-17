@@ -1,4 +1,4 @@
-use anchor_lang::prelude::*;
+use anchor_lang::{prelude::*, InstructionData};
 use solana_program::instruction::Instruction;
 
 declare_id!("CwrqeMj2U8tFr1Rhkgwc84tpAsqbt9pTt2a4taoTADPr");
@@ -8,13 +8,13 @@ pub fn initialize_direct_chat(
     reciprocator: Pubkey,
     chat_pda: Pubkey
 ) -> Instruction {
-    Instruction::new_with_borsh(
+    let instruction = instruction::InitialiseDirectChat {};
+    Instruction::new_with_bytes(
         ID,
-        &instruction::InitialiseDirectChat {
-            reciprocator
-        },
+        &instruction.data(),
         vec![
             AccountMeta::new(initiator, true),
+            AccountMeta::new_readonly(reciprocator, false),
             AccountMeta::new(chat_pda, false),
             AccountMeta::new(solana_program::system_program::ID, false),
         ],
@@ -22,11 +22,12 @@ pub fn initialize_direct_chat(
 }
 
 pub fn send_direct_mesage(sender: Pubkey, chat_pda: Pubkey, message_pda: Pubkey, encrypted_text: Vec<u8>) -> Instruction {
-    Instruction::new_with_borsh(
+    let instruction = instruction::SendDirectMessage {
+        encrypted_text
+    };
+    Instruction::new_with_bytes(
         ID,
-        &instruction::SendDirectMessage {
-            encrypted_text
-        },
+        &instruction.data(),
         vec![
             AccountMeta::new(sender, true),
             AccountMeta::new(chat_pda, false),
@@ -40,12 +41,9 @@ pub fn send_direct_mesage(sender: Pubkey, chat_pda: Pubkey, message_pda: Pubkey,
 pub mod mesenger {
     use super::*;
 
-    pub fn initialise_direct_chat(
-        context: Context<StartDirectChat>,
-        reciprocator: Pubkey
-    ) -> Result<()> {
+    pub fn initialise_direct_chat(context: Context<StartDirectChat>) -> Result<()> {
         context.accounts.chat.initiator = context.accounts.initiator.key();
-        context.accounts.chat.reciprocator = reciprocator;
+        context.accounts.chat.reciprocator = context.accounts.reciprocator.key();
         Ok(())
     }
 
@@ -81,10 +79,16 @@ pub enum ChatError {
 pub struct StartDirectChat<'info> {
     #[account(mut)]
     pub initiator: Signer<'info>,
+    pub reciprocator: AccountInfo<'info>,
     #[account(
         init, 
         payer = initiator, 
         owner = *program_id,
+        seeds = [
+            std::cmp::min(initiator.key().as_ref(), reciprocator.key().as_ref()),
+            std::cmp::max(initiator.key().as_ref(), reciprocator.key().as_ref())
+        ],
+        bump,
         space = 8 + DIRECT_CHAT_SIZE
     )]
     pub chat: Account<'info, DirectChat>,
