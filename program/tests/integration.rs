@@ -18,17 +18,26 @@ async fn test_chat_program() {
     println!("Reciprocator: {}", reciprocator.pubkey());
 
     // Start chat
-    let chat_pda = initialize_direct_chat(&mut context, &initiator, reciprocator.pubkey())
-        .await
-        .unwrap();
+    let chat_pda = program::direct_chat_pda(&initiator.pubkey(), &reciprocator.pubkey());
     println!("Chat PDA Address: {}", chat_pda);
+    assert!(context
+        .banks_client
+        .get_account(chat_pda)
+        .await
+        .unwrap()
+        .is_none());
 
     // Send first message
     let encrypted_text: Vec<u8> = "Hello".into();
-    let first_message_pda =
-        send_direct_message(&mut context, &initiator, encrypted_text.clone(), chat_pda)
-            .await
-            .unwrap();
+    let first_message_pda = send_direct_message(
+        &mut context,
+        &initiator,
+        reciprocator.pubkey(),
+        encrypted_text.clone(),
+        chat_pda,
+    )
+    .await
+    .unwrap();
     println!("First message PDA Address: {}", first_message_pda);
 
     {
@@ -63,6 +72,7 @@ async fn test_chat_program() {
     let second_message_pda = send_direct_message(
         &mut context,
         &reciprocator,
+        initiator.pubkey(),
         encrypted_response.clone(),
         chat_pda,
     )
@@ -105,22 +115,10 @@ fn add_account(validator: &mut ProgramTest) -> Keypair {
     keypair
 }
 
-async fn initialize_direct_chat(
-    context: &mut ProgramTestContext,
-    initiator: &Keypair,
-    reciprocator: Pubkey,
-) -> Result<Pubkey, BanksClientError> {
-    let initiator_pubkey = initiator.pubkey();
-    let chat_seed = program::direct_message_seed(&initiator_pubkey, &reciprocator);
-    let (chat_pda, _chat_bump) = Pubkey::find_program_address(&chat_seed, &program::ID);
-    let instruction = program::initialize_direct_chat(initiator.pubkey(), reciprocator, chat_pda);
-    execute(context, initiator, &[instruction], vec![initiator]).await?;
-    Ok(chat_pda)
-}
-
 async fn send_direct_message(
     context: &mut ProgramTestContext,
     sender: &Keypair,
+    receiver: Pubkey,
     encrypted_text: Vec<u8>,
     chat_pda: Pubkey,
 ) -> Result<Pubkey, BanksClientError> {
@@ -129,6 +127,7 @@ async fn send_direct_message(
     let (message_pda, _bump) = Pubkey::find_program_address(&[&seed], &program::ID);
     let instruction = program::send_direct_mesage(
         from_pubkey,
+        receiver,
         chat_pda,
         seed.into(),
         message_pda,

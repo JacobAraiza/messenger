@@ -1,28 +1,11 @@
 use anchor_lang::{prelude::*, InstructionData};
 use solana_program::instruction::Instruction;
 
-declare_id!("CwrqeMj2U8tFr1Rhkgwc84tpAsqbt9pTt2a4taoTADPr");
-
-pub fn initialize_direct_chat(
-    initiator: Pubkey,
-    reciprocator: Pubkey,
-    chat_pda: Pubkey
-) -> Instruction {
-    let instruction = instruction::InitialiseDirectChat {};
-    Instruction::new_with_bytes(
-        ID,
-        &instruction.data(),
-        vec![
-            AccountMeta::new(initiator, true),
-            AccountMeta::new_readonly(reciprocator, false),
-            AccountMeta::new(chat_pda, false),
-            AccountMeta::new(solana_program::system_program::ID, false),
-        ],
-    )
-}
+declare_id!("2Ls5MquEmp42AXBxKXX3a9Gu54aPYYVC19tV7RCMKsTt");
 
 pub fn send_direct_mesage(
     sender: Pubkey, 
+    receiver: Pubkey, 
     chat_pda: Pubkey, 
     message_seed: Vec<u8>, 
     message_pda: Pubkey, 
@@ -37,6 +20,7 @@ pub fn send_direct_mesage(
         &instruction.data(),
         vec![
             AccountMeta::new(sender, true),
+            AccountMeta::new_readonly(receiver, false),
             AccountMeta::new(chat_pda, false),
             AccountMeta::new(message_pda, false),
             AccountMeta::new(solana_program::system_program::ID, false),
@@ -46,19 +30,26 @@ pub fn send_direct_mesage(
 
 #[program]
 pub mod mesenger {
-
     use super::*;
-
-    pub fn initialise_direct_chat(context: Context<StartDirectChat>) -> Result<()> {
-        context.accounts.chat.initiator = context.accounts.initiator.key();
-        context.accounts.chat.reciprocator = context.accounts.reciprocator.key();
-        Ok(())
-    }
 
     #[allow(unused_variables)] // message seed used in `init` of SendDirectMessage
     pub fn send_direct_message(context: Context<SendDirectMessage>, message_seed: Vec<u8>, encrypted_text: Vec<u8>) -> Result<()> {
         if encrypted_text.len() > MAX_STRING_BYTES {
             return err!(ChatError::MessageTextTooLarge);
+        }
+
+        if context.accounts.chat.initialised {
+            // Check sender and receiver match the existing direct chat
+            let sender_initiator = context.accounts.chat.initiator == context.accounts.sender.key() && context.accounts.chat.reciprocator == context.accounts.receiver.key();
+            let sender_reciprocator = context.accounts.chat.reciprocator == context.accounts.sender.key() && context.accounts.chat.initiator == context.accounts.receiver.key();
+            if !(sender_initiator || sender_reciprocator) {
+                return err!(ChatError::DirectChatParticipentMismatch);
+            }
+        } else {
+            // First message in chat
+            context.accounts.chat.initiator = context.accounts.sender.key();
+            context.accounts.chat.reciprocator = context.accounts.receiver.key();
+            context.accounts.chat.initialised = true;
         }
 
         // Set message data
@@ -81,38 +72,23 @@ pub mod mesenger {
 #[error_code]
 pub enum ChatError {
     #[msg("Message text is too many bytes (maximum of 255 bytes)")]
-    MessageTextTooLarge
-}
-
-#[derive(Accounts)]
-pub struct StartDirectChat<'info> {
-    #[account(mut)]
-    pub initiator: Signer<'info>,
-    pub reciprocator: AccountInfo<'info>,
-    #[account(
-        init, 
-        payer = initiator, 
-        owner = *program_id,
-        seeds = [
-            std::cmp::min(initiator.key().as_ref(), reciprocator.key().as_ref()),
-            std::cmp::max(initiator.key().as_ref(), reciprocator.key().as_ref())
-        ],
-        bump,
-        space = 8 + DIRECT_CHAT_SIZE
-    )]
-    pub chat: Account<'info, DirectChat>,
-    pub system_program: Program<'info, System>,
+    MessageTextTooLarge,
+    #[msg("Direct chat already exists: cannot reinitialize")]
+    DirectChatAlreadyExists,
+    #[msg("Direct chat does not matcher sender and receiver")]
+    DirectChatParticipentMismatch,
 }
 
 #[account]
 pub struct DirectChat {
+    pub initialised: bool,
     pub initiator: Pubkey,
     pub reciprocator: Pubkey,
     pub last_message: Option<Pubkey>,
 }
 
 // https://book.anchor-lang.com/anchor_references/space.html
-const DIRECT_CHAT_SIZE: usize = 32 + 32 + 1 + 32;
+const DIRECT_CHAT_SIZE: usize = 1 + 32 + 32 + 1 + 32;
 
 #[account]
 pub struct Message {
@@ -137,14 +113,21 @@ pub enum Direction {
 pub struct SendDirectMessage<'info> {
     #[account(mut)]
     pub sender: Signer<'info>,
+    pub receiver: AccountInfo<'info>,
     #[account(
-        mut,
+        init_if_needed, 
+        payer = sender, 
         owner = *program_id,
-        constraint = (sender.key() == chat.initiator || sender.key() == chat.reciprocator)
+        seeds = [
+            std::cmp::min(sender.key().as_ref(), receiver.key().as_ref()),
+            std::cmp::max(sender.key().as_ref(), receiver.key().as_ref())
+        ],
+        bump,
+        space = 8 + DIRECT_CHAT_SIZE
     )]
     pub chat: Account<'info, DirectChat>,
     #[account(
-        init, 
+        init_if_needed, 
         payer = sender, 
         owner = *program_id,
         seeds = [message_seed.as_ref()],
@@ -155,10 +138,16 @@ pub struct SendDirectMessage<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn direct_message_seed<'a>(initiator: &'a Pubkey, recipricator: &'a Pubkey) -> [&'a [u8]; 2] {
-    if initiator < recipricator {
-        [initiator.as_ref(), recipricator.as_ref()]
+pub fn direct_chat_pda(sender: &Pubkey, receiver: &Pubkey) -> Pubkey {
+    let chat_seed = direct_message_seed(sender, receiver);
+    let (chat_pda, _chat_bump) = Pubkey::find_program_address(&chat_seed, &ID);
+    chat_pda
+}
+
+pub fn direct_message_seed<'a>(sender: &'a Pubkey, receiver: &'a Pubkey) -> [&'a [u8]; 2] {
+    if sender < receiver {
+        [sender.as_ref(), receiver.as_ref()]
     } else {
-        [recipricator.as_ref(), initiator.as_ref()]
+        [receiver.as_ref(), sender.as_ref()]
     }
 }

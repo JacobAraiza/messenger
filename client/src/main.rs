@@ -10,44 +10,37 @@ fn main() {
     let args = Arguments::from_args();
     let client = RpcClient::new_with_commitment(args.url, CommitmentConfig::confirmed());
     // TODO check if exists already
-    let chat_address = initialize_direct_chat(&client, &args.keypair, &args.to_address).unwrap();
-    // TODO encrypt
-    send_direct_mesage(&client, &args.keypair, chat_address, args.message.into()).unwrap();
+    let chat_address = program::direct_chat_pda(&args.keypair.pubkey(), &args.to);
+    send_direct_mesage(&client, &args.keypair, &chat_address, args.message.into()).unwrap();
 }
 
 #[derive(StructOpt)]
 struct Arguments {
     #[structopt(default_value = "http://localhost:8899")]
     url: String,
-    #[structopt(parse(try_from_str=read_keypair_file), default_value = "~/.chat.keypair")]
+    #[structopt(short, long, parse(try_from_str=read_keypair_file), default_value = "~/.chat.keypair")]
     keypair: Keypair,
-    to_address: Pubkey,
+    #[structopt(short, long)]
+    to: Pubkey,
+    #[structopt(short, long)]
     message: String,
-}
-
-fn initialize_direct_chat(
-    client: &RpcClient,
-    initiator: &Keypair,
-    reciprocator: &Pubkey,
-) -> Result<Pubkey, Error> {
-    let initiator_pubkey = initiator.pubkey();
-    let chat_seed = program::direct_message_seed(&initiator_pubkey, reciprocator);
-    let (chat_pda, _chat_bump) = Pubkey::find_program_address(&chat_seed, &program::ID);
-    let instruction = program::initialize_direct_chat(initiator.pubkey(), *reciprocator, chat_pda);
-    execute(client, initiator, &[instruction], vec![initiator])?;
-    Ok(chat_pda)
 }
 
 fn send_direct_mesage(
     client: &RpcClient,
     sender: &Keypair,
-    chat_address: Pubkey,
+    chat_address: &Pubkey,
     encrypted_text: Vec<u8>,
 ) -> Result<(), Error> {
-    let random_seed = [rand::thread_rng().gen::<u8>()];
-    let (message_pda, _bump) = Pubkey::find_program_address(&[&random_seed], &program::ID);
-    let instruction =
-        program::send_direct_mesage(sender.pubkey(), chat_address, message_pda, encrypted_text);
+    let message_seed: [u8; 8] = rand::thread_rng().gen();
+    let (message_pda, _bump) = Pubkey::find_program_address(&[&message_seed], &program::ID);
+    let instruction = program::send_direct_mesage(
+        sender.pubkey(),
+        *chat_address,
+        message_seed.into(),
+        message_pda,
+        encrypted_text,
+    );
     execute(client, sender, &[instruction], vec![sender])
 }
 
