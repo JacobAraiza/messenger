@@ -671,6 +671,7 @@ dependencies = [
 name = "client"
 version = "0.1.0"
 dependencies = [
+ "anchor-lang",
  "program",
  "rand 0.8.5",
  "solana-client",

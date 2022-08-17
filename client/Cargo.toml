@@ -7,6 +7,7 @@ edition = "2021"
 structopt = "=0.3.26"
 solana-sdk = "=1.10.29"
 solana-client = "=1.10.29"
+anchor-lang = "=0.25"
 rand = "0.8.5"
 
 program = { path = "../program" }

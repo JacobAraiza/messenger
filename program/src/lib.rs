@@ -32,7 +32,7 @@ pub fn send_direct_mesage(
 pub mod mesenger {
     use super::*;
 
-    #[allow(unused_variables)] // message seed used in `init` of SendDirectMessage
+    #[allow(unused_variables)] // `message_seed` used in `init` of `SendDirectMessage`
     pub fn send_direct_message(context: Context<SendDirectMessage>, message_seed: Vec<u8>, encrypted_text: Vec<u8>) -> Result<()> {
         if encrypted_text.len() > MAX_STRING_BYTES {
             return err!(ChatError::MessageTextTooLarge);
