@@ -21,8 +21,15 @@ pub fn initialize_direct_chat(
     )
 }
 
-pub fn send_direct_mesage(sender: Pubkey, chat_pda: Pubkey, message_pda: Pubkey, encrypted_text: Vec<u8>) -> Instruction {
+pub fn send_direct_mesage(
+    sender: Pubkey, 
+    chat_pda: Pubkey, 
+    message_seed: Vec<u8>, 
+    message_pda: Pubkey, 
+    encrypted_text: Vec<u8>
+) -> Instruction {
     let instruction = instruction::SendDirectMessage {
+        message_seed,
         encrypted_text
     };
     Instruction::new_with_bytes(
@@ -39,6 +46,7 @@ pub fn send_direct_mesage(sender: Pubkey, chat_pda: Pubkey, message_pda: Pubkey,
 
 #[program]
 pub mod mesenger {
+
     use super::*;
 
     pub fn initialise_direct_chat(context: Context<StartDirectChat>) -> Result<()> {
@@ -47,7 +55,8 @@ pub mod mesenger {
         Ok(())
     }
 
-    pub fn send_direct_message(context: Context<SendDirectMessage>, encrypted_text: Vec<u8>) -> Result<()> {
+    #[allow(unused_variables)] // message seed used in `init` of SendDirectMessage
+    pub fn send_direct_message(context: Context<SendDirectMessage>, message_seed: Vec<u8>, encrypted_text: Vec<u8>) -> Result<()> {
         if encrypted_text.len() > MAX_STRING_BYTES {
             return err!(ChatError::MessageTextTooLarge);
         }
@@ -97,9 +106,9 @@ pub struct StartDirectChat<'info> {
 
 #[account]
 pub struct DirectChat {
-    initiator: Pubkey,
-    reciprocator: Pubkey,
-    last_message: Option<Pubkey>,
+    pub initiator: Pubkey,
+    pub reciprocator: Pubkey,
+    pub last_message: Option<Pubkey>,
 }
 
 // https://book.anchor-lang.com/anchor_references/space.html
@@ -107,9 +116,9 @@ const DIRECT_CHAT_SIZE: usize = 32 + 32 + 1 + 32;
 
 #[account]
 pub struct Message {
-    direction: Direction,
-    previous_message: Option<Pubkey>,
-    encrypted_text: Vec<u8>,
+    pub direction: Direction,
+    pub previous_message: Option<Pubkey>,
+    pub encrypted_text: Vec<u8>,
 }
 
 // https://book.anchor-lang.com/anchor_references/space.html
@@ -117,25 +126,29 @@ const MESSAGE_MAX_SIZE: usize = 1 + 1 + 32 + 4 + MAX_STRING_BYTES;
 
 const MAX_STRING_BYTES: usize = 255;
 
-#[derive(AnchorDeserialize, AnchorSerialize, Clone)]
-enum Direction {
+#[derive(AnchorDeserialize, AnchorSerialize, Clone, Eq, PartialEq, Debug)]
+pub enum Direction {
     InitiatorToReciprocator,
     ReciprocatorToInitiator,
 }
 
 #[derive(Accounts)]
+#[instruction(message_seed: Vec<u8>)]
 pub struct SendDirectMessage<'info> {
     #[account(mut)]
     pub sender: Signer<'info>,
     #[account(
+        mut,
         owner = *program_id,
         constraint = (sender.key() == chat.initiator || sender.key() == chat.reciprocator)
     )]
-    pub chat: Account<'info, DirectChat>,    
+    pub chat: Account<'info, DirectChat>,
     #[account(
         init, 
         payer = sender, 
         owner = *program_id,
+        seeds = [message_seed.as_ref()],
+        bump,
         space = 8 + MESSAGE_MAX_SIZE
     )]
     pub message: Account<'info, Message>,
