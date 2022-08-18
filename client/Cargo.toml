@@ -9,5 +9,6 @@ solana-sdk = "=1.10.29"
 solana-client = "=1.10.29"
 anchor-lang = "=0.25"
 rand = "0.8.5"
+libsodium-sys-stable = "=1.19.22"
 
 program = { path = "../program" }

@@ -9,9 +9,12 @@ use structopt::StructOpt;
 
 type Error = Box<dyn std::error::Error>;
 
+mod encrypt;
+
 fn main() {
     let args = Arguments::from_args();
     let client = RpcClient::new_with_commitment(args.url, CommitmentConfig::confirmed());
+    // let key = encrypt::SharedKey::from_solana_keys(&args.keypair, &args.to);
     // TODO check if exists already
     let chat_address = program::direct_chat_pda(&args.keypair.pubkey(), &args.to);
     send_direct_mesage(
