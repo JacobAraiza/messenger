@@ -11,14 +11,17 @@ use solana_sdk::{
 async fn test_chat_program() {
     let mut validator = ProgramTest::default();
     validator.add_program("program", program::ID, processor!(program::entry));
-    let initiator = add_account(&mut validator);
-    let reciprocator = add_account(&mut validator);
+    let mut junior = add_account(&mut validator);
+    let mut senior = add_account(&mut validator);
+    if junior.pubkey() > senior.pubkey() {
+        std::mem::swap(&mut junior, &mut senior);
+    }
     let mut context = validator.start_with_context().await;
-    println!("Intiator: {}", initiator.pubkey());
-    println!("Reciprocator: {}", reciprocator.pubkey());
+    println!("Junior: {}", junior.pubkey());
+    println!("Senior: {}", senior.pubkey());
 
     // Start chat
-    let chat_pda = program::direct_chat_pda(&initiator.pubkey(), &reciprocator.pubkey());
+    let chat_pda = program::direct_chat_pda(&junior.pubkey(), &senior.pubkey());
     println!("Chat PDA Address: {}", chat_pda);
     assert!(context
         .banks_client
@@ -31,8 +34,8 @@ async fn test_chat_program() {
     let encrypted_text: Vec<u8> = "Hello".into();
     let first_message_pda = send_direct_message(
         &mut context,
-        &initiator,
-        reciprocator.pubkey(),
+        &junior,
+        senior.pubkey(),
         encrypted_text.clone(),
         chat_pda,
     )
@@ -48,10 +51,7 @@ async fn test_chat_program() {
             .unwrap()
             .unwrap();
         let message_data = program::Message::try_deserialize(&mut message.data.as_ref()).unwrap();
-        assert_eq!(
-            message_data.direction,
-            program::Direction::InitiatorToReciprocator
-        );
+        assert_eq!(message_data.direction, program::Direction::JuniorToSenior);
         assert_eq!(message_data.previous_message, None);
         assert_eq!(message_data.encrypted_text, encrypted_text);
 
@@ -62,8 +62,8 @@ async fn test_chat_program() {
             .unwrap()
             .unwrap();
         let chat_data = program::DirectChat::try_deserialize(&mut chat.data.as_ref()).unwrap();
-        assert_eq!(chat_data.initiator, initiator.pubkey());
-        assert_eq!(chat_data.reciprocator, reciprocator.pubkey());
+        assert_eq!(chat_data.junior, junior.pubkey());
+        assert_eq!(chat_data.senior, senior.pubkey());
         assert_eq!(chat_data.last_message, Some(first_message_pda));
     }
 
@@ -71,8 +71,8 @@ async fn test_chat_program() {
     let encrypted_response: Vec<u8> = "Hi! Who's this?".into();
     let second_message_pda = send_direct_message(
         &mut context,
-        &reciprocator,
-        initiator.pubkey(),
+        &senior,
+        junior.pubkey(),
         encrypted_response.clone(),
         chat_pda,
     )
@@ -88,10 +88,7 @@ async fn test_chat_program() {
             .unwrap()
             .unwrap();
         let message_data = program::Message::try_deserialize(&mut message.data.as_ref()).unwrap();
-        assert_eq!(
-            message_data.direction,
-            program::Direction::ReciprocatorToInitiator
-        );
+        assert_eq!(message_data.direction, program::Direction::SeniorToJunior);
         assert_eq!(message_data.previous_message, Some(first_message_pda));
         assert_eq!(message_data.encrypted_text, encrypted_response);
 
@@ -102,8 +99,8 @@ async fn test_chat_program() {
             .unwrap()
             .unwrap();
         let chat_data = program::DirectChat::try_deserialize(&mut chat.data.as_ref()).unwrap();
-        assert_eq!(chat_data.initiator, initiator.pubkey());
-        assert_eq!(chat_data.reciprocator, reciprocator.pubkey());
+        assert_eq!(chat_data.junior, junior.pubkey());
+        assert_eq!(chat_data.senior, senior.pubkey());
         assert_eq!(chat_data.last_message, Some(second_message_pda));
     }
 }

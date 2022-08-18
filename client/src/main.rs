@@ -1,4 +1,5 @@
 use anchor_lang::AccountDeserialize;
+use encrypt::SharedKey;
 use rand::Rng;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -14,18 +15,12 @@ mod encrypt;
 fn main() {
     let args = Arguments::from_args();
     let client = RpcClient::new_with_commitment(args.url, CommitmentConfig::confirmed());
-    // let key = encrypt::SharedKey::from_solana_keys(&args.keypair, &args.to);
+    let encryption_key = create_encryption_key(&args.keypair, &args.to);
+    let ciphertext = encryption_key.transmit_key.encrypt(&args.message);
     // TODO check if exists already
     let chat_address = program::direct_chat_pda(&args.keypair.pubkey(), &args.to);
-    send_direct_mesage(
-        &client,
-        &args.keypair,
-        &args.to,
-        &chat_address,
-        args.message.into(),
-    )
-    .unwrap();
-    print_messages(&client, &args.keypair.pubkey(), &args.to);
+    send_direct_mesage(&client, &args.keypair, &args.to, &chat_address, ciphertext).unwrap();
+    print_messages(&client, &encryption_key, &args.keypair.pubkey(), &args.to);
 }
 
 #[derive(StructOpt)]
@@ -77,24 +72,36 @@ fn execute(
     Ok(())
 }
 
-fn print_messages(client: &RpcClient, sender: &Pubkey, receiver: &Pubkey) {
-    let chat_pda = program::direct_chat_pda(sender, receiver);
+fn print_messages(client: &RpcClient, key: &SharedKey, me: &Pubkey, them: &Pubkey) {
+    let chat_pda = program::direct_chat_pda(me, them);
     let chat_account = client.get_account(&chat_pda).expect("No messages");
     let chat = program::DirectChat::try_deserialize(&mut chat_account.data.as_ref())
         .expect("Not a DirectChat account");
     let mut next_message = chat.last_message;
+    let (junior_key, senior_key) = match me == &chat.junior {
+        true => (&key.transmit_key, &key.receive_key),
+        false => (&key.receive_key, &key.transmit_key),
+    };
     while let Some(message_pda) = next_message {
         let message_account = client
             .get_account(&message_pda)
             .expect("Message PDA not found");
         let message = program::Message::try_deserialize(&mut message_account.data.as_ref())
             .expect("Not a Message account");
-        let (indicator, name) = match message.direction {
-            program::Direction::InitiatorToReciprocator => (">>>", chat.initiator),
-            program::Direction::ReciprocatorToInitiator => ("<<<", chat.reciprocator),
+        let (indicator, name, decrypt_key) = match message.direction {
+            program::Direction::JuniorToSenior => (">>>", chat.junior, junior_key),
+            program::Direction::SeniorToJunior => ("<<<", chat.senior, senior_key),
         };
-        let text = String::from_utf8(message.encrypted_text).unwrap();
+        let text = decrypt_key.decrypt(&message.encrypted_text);
         println!("{} {}: {}", indicator, name, text);
         next_message = message.previous_message
+    }
+}
+
+fn create_encryption_key(me: &Keypair, them: &Pubkey) -> SharedKey {
+    if me.pubkey() < *them {
+        SharedKey::new_as_junior(me, them)
+    } else {
+        SharedKey::new_as_senior(me, them)
     }
 }

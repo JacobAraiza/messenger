@@ -39,24 +39,24 @@ pub mod mesenger {
         }
 
         if context.accounts.chat.initialised {
-            // Check sender and receiver match the existing direct chat
-            let sender_initiator = context.accounts.chat.initiator == context.accounts.sender.key() && context.accounts.chat.reciprocator == context.accounts.receiver.key();
-            let sender_reciprocator = context.accounts.chat.reciprocator == context.accounts.sender.key() && context.accounts.chat.initiator == context.accounts.receiver.key();
-            if !(sender_initiator || sender_reciprocator) {
+            // Check participents match the existing direct chat
+            let sender_junior = context.accounts.chat.junior == context.accounts.sender.key() && context.accounts.chat.senior == context.accounts.receiver.key();
+            let sender_senior = context.accounts.chat.senior == context.accounts.sender.key() && context.accounts.chat.junior == context.accounts.receiver.key();
+            if !(sender_junior || sender_senior) {
                 return err!(ChatError::DirectChatParticipentMismatch);
             }
         } else {
             // First message in chat
-            context.accounts.chat.initiator = context.accounts.sender.key();
-            context.accounts.chat.reciprocator = context.accounts.receiver.key();
+            context.accounts.chat.junior = std::cmp::min(context.accounts.sender.key(), context.accounts.receiver.key());
+            context.accounts.chat.senior = std::cmp::max(context.accounts.sender.key(), context.accounts.receiver.key());
             context.accounts.chat.initialised = true;
         }
 
         // Set message data
-        let direction = if context.accounts.sender.key() == context.accounts.chat.initiator {
-            Direction::InitiatorToReciprocator
+        let direction = if context.accounts.sender.key() == context.accounts.chat.senior {
+            Direction::SeniorToJunior
         } else {
-            Direction::ReciprocatorToInitiator
+            Direction::JuniorToSenior
         };
         context.accounts.message.direction = direction;
         context.accounts.message.encrypted_text = encrypted_text;
@@ -82,8 +82,8 @@ pub enum ChatError {
 #[account]
 pub struct DirectChat {
     pub initialised: bool,
-    pub initiator: Pubkey,
-    pub reciprocator: Pubkey,
+    pub junior: Pubkey,
+    pub senior: Pubkey,
     pub last_message: Option<Pubkey>,
 }
 
@@ -104,8 +104,8 @@ const MAX_STRING_BYTES: usize = 255;
 
 #[derive(AnchorDeserialize, AnchorSerialize, Clone, Eq, PartialEq, Debug)]
 pub enum Direction {
-    InitiatorToReciprocator,
-    ReciprocatorToInitiator,
+    JuniorToSenior,
+    SeniorToJunior,
 }
 
 #[derive(Accounts)]

@@ -7,19 +7,19 @@ pub struct SharedKey {
 }
 
 impl SharedKey {
-    pub fn new_initiator(initator: &Keypair, reciprocator: &Pubkey) -> Self {
+    pub fn new_as_senior(senior: &Keypair, junior: &Pubkey) -> Self {
         Self::new_client(
-            &Curve25519PublicKey::from(&initator.pubkey()),
-            &Curve25519SecretKey::from(initator),
-            &Curve25519PublicKey::from(reciprocator),
+            &Curve25519PublicKey::from(&senior.pubkey()),
+            &Curve25519SecretKey::from(senior),
+            &Curve25519PublicKey::from(junior),
         )
     }
 
-    pub fn new_reciprocator(reciprocator: &Keypair, initator: &Pubkey) -> Self {
+    pub fn new_as_junior(junior: &Keypair, senior: &Pubkey) -> Self {
         Self::new_server(
-            &Curve25519PublicKey::from(&reciprocator.pubkey()),
-            &Curve25519SecretKey::from(reciprocator),
-            &Curve25519PublicKey::from(initator),
+            &Curve25519PublicKey::from(&junior.pubkey()),
+            &Curve25519SecretKey::from(junior),
+            &Curve25519PublicKey::from(senior),
         )
     }
 
@@ -181,17 +181,17 @@ mod test {
 
     #[test]
     fn test_encryption() {
-        let initator = Keypair::new();
-        let reciprocator = Keypair::new();
+        let senior = Keypair::new();
+        let junior = Keypair::new();
 
-        let initator_key = SharedKey::new_initiator(&initator, &reciprocator.pubkey());
-        let reciprocator_key = SharedKey::new_reciprocator(&reciprocator, &initator.pubkey());
+        let senior_key = SharedKey::new_as_senior(&senior, &junior.pubkey());
+        let junior_key = SharedKey::new_as_junior(&junior, &senior.pubkey());
 
-        assert_eq!(initator_key.transmit_key, reciprocator_key.receive_key);
-        assert_eq!(reciprocator_key.transmit_key, initator_key.receive_key);
+        assert_eq!(senior_key.transmit_key, junior_key.receive_key);
+        assert_eq!(junior_key.transmit_key, senior_key.receive_key);
 
         let plaintext = "Hello world!";
-        let ciphertext = initator_key.transmit_key.encrypt(plaintext);
-        assert_eq!(reciprocator_key.receive_key.decrypt(&ciphertext), plaintext);
+        let ciphertext = senior_key.transmit_key.encrypt(plaintext);
+        assert_eq!(junior_key.receive_key.decrypt(&ciphertext), plaintext);
     }
 }
