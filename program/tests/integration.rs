@@ -8,40 +8,36 @@ use solana_sdk::{
 };
 
 #[tokio::test]
-async fn test_chat_program() {
+async fn test_program() {
     let mut validator = ProgramTest::default();
     validator.add_program("program", program::ID, processor!(program::entry));
-    let mut junior = add_account(&mut validator);
-    let mut senior = add_account(&mut validator);
-    if junior.pubkey() > senior.pubkey() {
-        std::mem::swap(&mut junior, &mut senior);
-    }
+    let alpha = add_account(&mut validator);
+    let beta = add_account(&mut validator);
     let mut context = validator.start_with_context().await;
-    println!("Junior: {}", junior.pubkey());
-    println!("Senior: {}", senior.pubkey());
 
-    // Start chat
-    let chat_pda = program::direct_chat_pda(&junior.pubkey(), &senior.pubkey());
-    println!("Chat PDA Address: {}", chat_pda);
+    // Check no mailboxes exist yet
+    let alpha_mailbox = program::mailbox_pda(&alpha.pubkey());
     assert!(context
         .banks_client
-        .get_account(chat_pda)
+        .get_account(alpha_mailbox)
+        .await
+        .unwrap()
+        .is_none());
+
+    let beta_mailbox = program::mailbox_pda(&beta.pubkey());
+    assert!(context
+        .banks_client
+        .get_account(beta_mailbox)
         .await
         .unwrap()
         .is_none());
 
     // Send first message
-    let encrypted_text: Vec<u8> = "Hello".into();
-    let first_message_pda = send_direct_message(
-        &mut context,
-        &junior,
-        senior.pubkey(),
-        encrypted_text.clone(),
-        chat_pda,
-    )
-    .await
-    .unwrap();
-    println!("First message PDA Address: {}", first_message_pda);
+    let ciphertext: Vec<u8> = "Hello".into();
+    let first_message_pda =
+        send_direct_message(&mut context, &alpha, beta.pubkey(), ciphertext.clone())
+            .await
+            .unwrap();
 
     {
         let message = context
@@ -51,34 +47,29 @@ async fn test_chat_program() {
             .unwrap()
             .unwrap();
         let message_data = program::Message::try_deserialize(&mut message.data.as_ref()).unwrap();
-        assert_eq!(message_data.direction, program::Direction::JuniorToSenior);
-        assert_eq!(message_data.previous_message, None);
-        assert_eq!(message_data.encrypted_text, encrypted_text);
+        assert_eq!(message_data.inbox, None);
+        assert_eq!(message_data.ciphertext, ciphertext);
 
         let chat = context
             .banks_client
-            .get_account(chat_pda)
+            .get_account(program::mailbox_pda(&beta.pubkey()))
             .await
             .unwrap()
             .unwrap();
-        let chat_data = program::DirectChat::try_deserialize(&mut chat.data.as_ref()).unwrap();
-        assert_eq!(chat_data.junior, junior.pubkey());
-        assert_eq!(chat_data.senior, senior.pubkey());
-        assert_eq!(chat_data.last_message, Some(first_message_pda));
+        let chat_data = program::Mailbox::try_deserialize(&mut chat.data.as_ref()).unwrap();
+        assert_eq!(chat_data.inbox, Some(first_message_pda));
     }
 
     // Send second message
     let encrypted_response: Vec<u8> = "Hi! Who's this?".into();
     let second_message_pda = send_direct_message(
         &mut context,
-        &senior,
-        junior.pubkey(),
+        &alpha,
+        beta.pubkey(),
         encrypted_response.clone(),
-        chat_pda,
     )
     .await
     .unwrap();
-    println!("Second message PDA Address: {}", second_message_pda);
 
     {
         let message = context
@@ -88,20 +79,17 @@ async fn test_chat_program() {
             .unwrap()
             .unwrap();
         let message_data = program::Message::try_deserialize(&mut message.data.as_ref()).unwrap();
-        assert_eq!(message_data.direction, program::Direction::SeniorToJunior);
-        assert_eq!(message_data.previous_message, Some(first_message_pda));
-        assert_eq!(message_data.encrypted_text, encrypted_response);
+        assert_eq!(message_data.inbox, Some(first_message_pda));
+        assert_eq!(message_data.ciphertext, encrypted_response);
 
         let chat = context
             .banks_client
-            .get_account(chat_pda)
+            .get_account(program::mailbox_pda(&beta.pubkey()))
             .await
             .unwrap()
             .unwrap();
-        let chat_data = program::DirectChat::try_deserialize(&mut chat.data.as_ref()).unwrap();
-        assert_eq!(chat_data.junior, junior.pubkey());
-        assert_eq!(chat_data.senior, senior.pubkey());
-        assert_eq!(chat_data.last_message, Some(second_message_pda));
+        let chat_data = program::Mailbox::try_deserialize(&mut chat.data.as_ref()).unwrap();
+        assert_eq!(chat_data.inbox, Some(second_message_pda));
     }
 }
 
@@ -117,7 +105,6 @@ async fn send_direct_message(
     sender: &Keypair,
     receiver: Pubkey,
     encrypted_text: Vec<u8>,
-    chat_pda: Pubkey,
 ) -> Result<Pubkey, BanksClientError> {
     let from_pubkey = sender.pubkey();
     let seed: [u8; 8] = rand::thread_rng().gen();
@@ -125,7 +112,6 @@ async fn send_direct_message(
     let instruction = program::send_direct_mesage(
         from_pubkey,
         receiver,
-        chat_pda,
         seed.into(),
         message_pda,
         encrypted_text,

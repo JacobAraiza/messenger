@@ -7,23 +7,23 @@ pub struct SharedKey {
 }
 
 impl SharedKey {
-    pub fn new_as_senior(senior: &Keypair, junior: &Pubkey) -> Self {
-        Self::new_client(
-            &Curve25519PublicKey::from(&senior.pubkey()),
-            &Curve25519SecretKey::from(senior),
-            &Curve25519PublicKey::from(junior),
-        )
+    pub fn new(my_keypair: &Keypair, their_pubkey: &Pubkey) -> Self {
+        if my_keypair.pubkey() < *their_pubkey {
+            Self::new_server(
+                &Curve25519PublicKey::from(&my_keypair.pubkey()),
+                &Curve25519SecretKey::from(my_keypair),
+                &Curve25519PublicKey::from(their_pubkey),
+            )
+        } else {
+            Self::new_client(
+                &Curve25519PublicKey::from(&my_keypair.pubkey()),
+                &Curve25519SecretKey::from(my_keypair),
+                &Curve25519PublicKey::from(their_pubkey),
+            )
+        }
     }
 
-    pub fn new_as_junior(junior: &Keypair, senior: &Pubkey) -> Self {
-        Self::new_server(
-            &Curve25519PublicKey::from(&junior.pubkey()),
-            &Curve25519SecretKey::from(junior),
-            &Curve25519PublicKey::from(senior),
-        )
-    }
-
-    pub fn new_client(
+    fn new_client(
         client_public: &Curve25519PublicKey,
         client_secret: &Curve25519SecretKey,
         server_public: &Curve25519PublicKey,
@@ -47,7 +47,7 @@ impl SharedKey {
         shared_key
     }
 
-    pub fn new_server(
+    fn new_server(
         server_public: &Curve25519PublicKey,
         server_secret: &Curve25519SecretKey,
         client_public: &Curve25519PublicKey,
@@ -181,17 +181,17 @@ mod test {
 
     #[test]
     fn test_encryption() {
-        let senior = Keypair::new();
-        let junior = Keypair::new();
+        let alpha = Keypair::new();
+        let beta = Keypair::new();
 
-        let senior_key = SharedKey::new_as_senior(&senior, &junior.pubkey());
-        let junior_key = SharedKey::new_as_junior(&junior, &senior.pubkey());
+        let alpha_key = SharedKey::new(&alpha, &beta.pubkey());
+        let beta_key = SharedKey::new(&beta, &alpha.pubkey());
 
-        assert_eq!(senior_key.transmit_key, junior_key.receive_key);
-        assert_eq!(junior_key.transmit_key, senior_key.receive_key);
+        assert_eq!(alpha_key.transmit_key, beta_key.receive_key);
+        assert_eq!(beta_key.transmit_key, alpha_key.receive_key);
 
         let plaintext = "Hello world!";
-        let ciphertext = senior_key.transmit_key.encrypt(plaintext);
-        assert_eq!(junior_key.receive_key.decrypt(&ciphertext), plaintext);
+        let ciphertext = alpha_key.transmit_key.encrypt(plaintext);
+        assert_eq!(beta_key.receive_key.decrypt(&ciphertext), plaintext);
     }
 }
